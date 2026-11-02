@@ -46,6 +46,9 @@ document.querySelector('#cancelSearch').onclick=()=>{stopSearch();notify('Đã d
 // Each physical piece has a fixed set of colours. This catches impossible or
 // duplicate pieces, although it is not a complete parity/orientation check.
 function pieceMultiset(s){const pieces=new Map();stickers.forEach((v,i)=>{let k=v.p.join(',');if(!pieces.has(k))pieces.set(k,[]);pieces.get(k).push(s[i])});let a=[...pieces.values()].map(v=>v.sort().join('')).sort();return a.join('|')}
+// Build two exact eight-piece abstractions (corners and top/bottom edges).
+// They are invariant orbits of the 4×3×3 moves; colours identify each piece.
+function solverPieceGroups(){let positions=new Map();stickers.forEach((v,i)=>{let k=v.p.join(',');if(!positions.has(k))positions.set(k,[]);positions.get(k).push(i)});let groups=[[],[]];for(let indices of positions.values()){let p=stickers[indices[0]].p;if(indices.length===3)groups[0].push(indices);else if(indices.length===2&&Math.abs(p[1])===3)groups[1].push(indices)}return groups.map(group=>{let byPosition=new Map(group.map((indices,i)=>[stickers[indices[0]].p.join(','),i]));return {indices:group,transitions:moves.map(m=>group.map(indices=>byPosition.get(stickers[m.perm[indices[0]]].p.join(','))))}})}
 document.querySelector('#solve').onclick=()=>{if(busy)return;if(state===goal){showSolution([]);return}let counts={};for(let c of state)counts[c]=(counts[c]||0)+1;if(Object.entries({W:9,Y:9,G:12,B:12,O:12,R:12}).some(([c,n])=>counts[c]!==n)){notify('Số ô của mỗi màu chưa đúng. Hãy kiểm tra bộ đếm bên dưới bảng trải.');return}if(pieceMultiset(state)!==pieceMultiset(goal)){notify('Tổ hợp màu trên một hoặc nhiều viên không hợp lệ. Hãy kiểm tra lại các ô.');return}if(history){let p=history.slice().reverse().map(inv);let test=state;for(let m of p)test=apply(test,m);if(test===goal){showSolution(p);return}}
 busy=true;document.querySelector('#solve').disabled=true;document.querySelector('#solve').textContent='Đang tìm lời giải…';document.querySelector('#searchStatus').hidden=false;document.querySelector('#searchProgress').textContent='Đang chuẩn bị tìm kiếm…';
 const workerCode=`
@@ -63,6 +66,22 @@ onmessage=function(e){
   }}if(depth%2===0)fa=next;else fb=next;
  }
  A=null;fa=null;fb=null;
+ // Exact pattern databases for the eight corners and eight outer edges.
+ // The tables are small (8! states each) and make the unlimited search prune
+ // much more aggressively without discarding any possible solution.
+ postMessage({type:'prepare'});
+ const factorial=[1,1,2,6,24,120,720,5040,40320];
+ function rank(a){let r=0;for(let i=0;i<8;i++){let n=0;for(let j=i+1;j<8;j++)if(a[j]<a[i])n++;r+=n*factorial[7-i]}return r}
+ function unrank(r){let items=[0,1,2,3,4,5,6,7],a=[];for(let i=0;i<8;i++){let f=factorial[7-i],k=Math.floor(r/f);r%=f;a.push(items.splice(k,1)[0])}return a}
+ function makePattern(group){let trans=new Uint16Array(40320*perms.length),goalKeys=group.indices.map(is=>is.map(i=>goal[i]).sort().join(''));
+  for(let r=0;r<40320;r++){let a=unrank(r);for(let m=0;m<perms.length;m++){let v=Array(8),mp=group.transitions[m];for(let i=0;i<8;i++)v[mp[i]]=a[i];trans[r*perms.length+m]=rank(v)}}
+  let distances=new Uint8Array(40320).fill(255),queue=new Uint16Array(40320),tail=1;distances[0]=0;queue[0]=0;
+  for(let head=0;head<tail;head++){let r=queue[head];for(let m=0;m<perms.length;m++){let next=trans[r*perms.length+m];if(distances[next]===255){distances[next]=distances[r]+1;queue[tail++]=next}}}
+  let initial=group.indices.map(is=>goalKeys.indexOf(is.map(i=>start[i]).sort().join('')));
+  return {trans,distances,initial:rank(initial)}
+ }
+ let corner=makePattern(e.data.groups[0]),edge=makePattern(e.data.groups[1]);
+ if(corner.distances[corner.initial]===255||edge.distances[edge.initial]===255){postMessage({type:'invalid'});return}
  // Admissible lower bounds: for each colour and sticker position, the fewest
  // turns needed to reach any position of that colour in the solved state.
  let dist={};for(let color of new Set(goal)){
@@ -72,22 +91,22 @@ onmessage=function(e){
  let maxAffected=Math.max(...perms.map(p=>p.reduce((n,t,i)=>n+(t!==i),0)));
  let nodes=0,path=[],found=null,startTime=Date.now();
  function heuristic(s){let wrong=0,h=0;for(let i=0;i<66;i++){if(s[i]!==goal[i])wrong++;let v=dist[s[i]][i];if(v>h)h=v}return Math.max(h,Math.ceil(wrong/maxAffected))}
- function dfs(s,remaining,last){
+ function dfs(s,remaining,last,cr,er){
   nodes++;if(nodes%500000===0)postMessage({type:'progress',depth:bound,nodes,seconds:Math.floor((Date.now()-startTime)/1000)});
-  let h=heuristic(s);if(h>remaining)return false;if(s===goal){found=path.slice();return true}if(remaining<=4){let tail=B.get(s);if(tail&&tail.length<=remaining){found=path.concat(tail.slice().reverse().map(x=>inverses[x]));return true}return false}
+  if(corner.distances[cr]>remaining||edge.distances[er]>remaining)return false;if(remaining<=4){let tail=B.get(s);if(tail&&tail.length<=remaining){found=path.concat(tail.slice().reverse().map(x=>inverses[x]));return true}return false}if(heuristic(s)>remaining)return false;
   for(let m=0;m<perms.length;m++){
    // Turns in the same layer combine; independent layers on one axis commute.
    if(last>=0&&axes[m]===axes[last]&&(layers[m]===layers[last]||layers[m]<layers[last]))continue;
-   path.push(m);if(dfs(apply(s,m),remaining-1,m))return true;path.pop()
+   let nextC=corner.trans[cr*perms.length+m],nextE=edge.trans[er*perms.length+m];if(corner.distances[nextC]>remaining-1||edge.distances[nextE]>remaining-1)continue;path.push(m);if(dfs(apply(s,m),remaining-1,m,nextC,nextE))return true;path.pop()
   }return false
  }
  // No fixed move limit: iterative deepening continues until found or cancelled.
  for(var bound=Math.max(9,heuristic(start));;bound++){
   postMessage({type:'progress',depth:bound,nodes,seconds:Math.floor((Date.now()-startTime)/1000)});
-  if(dfs(start,bound,-1)){postMessage({type:'result',path:found});return}
+  if(dfs(start,bound,-1,corner.initial,edge.initial)){postMessage({type:'result',path:found});return}
  }
 }`;
 let url=URL.createObjectURL(new Blob([workerCode],{type:'text/javascript'}));let worker=new Worker(url);URL.revokeObjectURL(url);activeWorker=worker;let searchState=state;
-worker.onmessage=e=>{if(e.data.type==='progress'){document.querySelector('#searchProgress').textContent=`Đang tìm đến ${e.data.depth} phép xoay · ${e.data.nodes.toLocaleString('vi-VN')} trạng thái · ${e.data.seconds} giây`;return}let path=e.data.path;stopSearch();if(state!==searchState){notify('Khối đã thay đổi trong lúc tìm. Hãy thử lại.');return}let test=searchState;for(let m of path)test=apply(test,m);if(test!==goal){notify('Lời giải không hợp lệ. Vui lòng thử lại.');return}showSolution(path)};
-worker.onerror=()=>{stopSearch();notify('Bộ tìm kiếm gặp lỗi hoặc hết bộ nhớ. Vui lòng thử lại.')};worker.postMessage({start:state,goal,perms:moves.map(m=>m.perm),inverses:moves.map((_,i)=>inv(i)),axes:moves.map(m=>m.axis),layers:moves.map(m=>m.layer)})};
+worker.onmessage=e=>{if(e.data.type==='prepare'){document.querySelector('#searchProgress').textContent='Đang tạo bảng tăng tốc tìm kiếm…';return}if(e.data.type==='invalid'){stopSearch();notify('Trạng thái các viên góc hoặc cạnh không thể đạt được. Hãy kiểm tra lại màu.');return}if(e.data.type==='progress'){document.querySelector('#searchProgress').textContent=`Đang tìm đến ${e.data.depth} phép xoay · ${e.data.nodes.toLocaleString('vi-VN')} trạng thái · ${e.data.seconds} giây`;return}let path=e.data.path;stopSearch();if(state!==searchState){notify('Khối đã thay đổi trong lúc tìm. Hãy thử lại.');return}let test=searchState;for(let m of path)test=apply(test,m);if(test!==goal){notify('Lời giải không hợp lệ. Vui lòng thử lại.');return}showSolution(path)};
+worker.onerror=()=>{stopSearch();notify('Bộ tìm kiếm gặp lỗi hoặc hết bộ nhớ. Vui lòng thử lại.')};worker.postMessage({start:state,goal,perms:moves.map(m=>m.perm),inverses:moves.map((_,i)=>inv(i)),axes:moves.map(m=>m.axis),layers:moves.map(m=>m.layer),groups:solverPieceGroups()})};
 renderPalette();render();
