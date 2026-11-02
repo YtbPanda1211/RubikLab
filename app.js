@@ -1,0 +1,93 @@
+const colors={W:{name:'Trắng',hex:'#f8f8f2'},Y:{name:'Vàng',hex:'#e9c45f'},G:{name:'Xanh lá',hex:'#72a886'},B:{name:'Xanh dương',hex:'#7199bb'},O:{name:'Cam',hex:'#eaa272'},R:{name:'Đỏ',hex:'#db7469'}};
+const faces=['U','L','F','R','B','D'], names={U:'TRÊN',D:'DƯỚI',F:'TRƯỚC',B:'SAU',L:'TRÁI',R:'PHẢI'}, faceColor={U:'W',D:'Y',F:'G',B:'B',L:'O',R:'R'};
+const stickers=[];const yval=r=>3-2*r;
+for(const f of faces){let rows=['U','D'].includes(f)?3:4;for(let r=0;r<rows;r++)for(let c=0;c<3;c++){let p,n;if(f==='F'){p=[c-1,yval(r),1];n=[0,0,1]}if(f==='B'){p=[1-c,yval(r),-1];n=[0,0,-1]}if(f==='R'){p=[1,yval(r),1-c];n=[1,0,0]}if(f==='L'){p=[-1,yval(r),c-1];n=[-1,0,0]}if(f==='U'){p=[c-1,3,r-1];n=[0,1,0]}if(f==='D'){p=[c-1,-3,1-r];n=[0,-1,0]}stickers.push({f,r,c,p,n});}}
+const key=(p,n)=>p.join(',')+'|'+n.join(',');const index=new Map(stickers.map((s,i)=>[key(s.p,s.n),i]));
+const goal=stickers.map(s=>faceColor[s.f]).join('');let state=goal, selected='W', history=[], solution=[], step=0, solutionStart=goal, solutionHistory=null, busy=false, activeWorker=null, playTimer=null, animFrame=null, animating=false;
+const moves=[];function addMove(axis,layer,turn,label,description){let perm=stickers.map((s,i)=>{let p=[...s.p],n=[...s.n];if(p[axis]===layer){function rot(v){if(axis===1){for(let j=0;j<turn;j++){let x=v[0];v[0]=-v[2];v[2]=x}}else if(axis===0){v[1]*=-1;v[2]*=-1}else{v[0]*=-1;v[1]*=-1}return v}rot(p);rot(n)}let target=index.get(key(p,n));if(target===undefined)throw Error('Sai phép xoay '+label);return target});moves.push({axis,layer,turn,label,description,perm});}
+for(let i=0;i<4;i++){let layer=3-2*i;addMove(1,layer,1,`Tầng ${i+1} ↻`,`Nhìn từ trên xuống, xoay tầng ${i+1} theo chiều kim đồng hồ 90°.`);addMove(1,layer,3,`Tầng ${i+1} ↺`,`Nhìn từ trên xuống, xoay tầng ${i+1} ngược chiều kim đồng hồ 90°.`);addMove(1,layer,2,`Tầng ${i+1} 180°`,`Xoay tầng ${i+1} nửa vòng (180°).`)}
+for(let i=0;i<3;i++){let layer=i-1;addMove(0,layer,2,`Cột ${i+1} 180°`,`Nhìn từ mặt trước, xoay cột ${i+1} từ trái sang phải nửa vòng (180°).`)}
+for(let i=0;i<3;i++){let layer=1-i;addMove(2,layer,2,`Lớp sâu ${i+1} 180°`,`Xoay lớp sâu ${i+1} tính từ mặt trước nửa vòng (180°).`)}
+function inv(i){if(i<12){let m=i%3;return m===0?i+1:m===1?i-1:i}return i}function apply(s,i){let a=Array(66);moves[i].perm.forEach((to,from)=>a[to]=s[from]);return a.join('')}
+function notify(t){const el=document.querySelector('#toast');el.textContent=t;el.classList.add('show');clearTimeout(notify.timer);notify.timer=setTimeout(()=>el.classList.remove('show'),3500)}
+function invalidate(){stopPlayback();cancelAnimation();if(activeWorker)stopSearch();solution=[];step=0;document.querySelector('#solutionContent').hidden=true;document.querySelector('#empty').hidden=false;document.querySelector('#solutionIntro').textContent='Lộ trình giải sẽ xuất hiện ở đây sau khi bạn nhập màu.'}
+function paint(i){if(state[i]===selected)return;state=state.substring(0,i)+selected+state.substring(i+1);history=null;invalidate();render()}
+const palette=document.querySelector('#palette');for(const [id,c] of Object.entries(colors)){let b=document.createElement('button');b.className='color-btn';b.style.background=c.hex;b.title=c.name;b.setAttribute('aria-label','Chọn màu '+c.name);b.onclick=()=>{selected=id;renderPalette()};b.dataset.color=id;palette.appendChild(b)}
+function renderPalette(){document.querySelectorAll('.color-btn').forEach(x=>x.classList.toggle('active',x.dataset.color===selected));document.querySelector('#selectedColor').textContent=colors[selected].name}
+const net=document.querySelector('#net');for(const f of faces){let face=document.createElement('div');face.className='face face-'+f;face.innerHTML=`<div class="face-name">${names[f]}</div><div class="face-grid"></div>`;stickers.forEach((s,i)=>{if(s.f===f){let b=document.createElement('button');b.className='sticker';b.dataset.i=i;b.onclick=()=>paint(i);face.lastChild.appendChild(b)}});net.appendChild(face)}
+const moveSelect=document.querySelector('#moveSelect');moves.forEach((m,i)=>moveSelect.add(new Option(m.label,i)));
+document.querySelector('#doMove').onclick=()=>{let m=+moveSelect.value;state=apply(state,m);if(history)history.push(m);invalidate();render()};
+document.querySelector('#reset').onclick=()=>{state=goal;history=[];invalidate();render();notify('Đã đưa khối về trạng thái hoàn thành.')};
+document.querySelector('#scramble').onclick=()=>{state=goal;history=[];let prev=-1;for(let i=0;i<18;i++){let m;do{m=Math.floor(Math.random()*moves.length)}while(prev>=0&&moves[m].axis===moves[prev].axis&&moves[m].layer===moves[prev].layer);state=apply(state,m);history.push(m);prev=m}invalidate();render();notify('Đã trộn khối với 18 phép xoay hợp lệ.')};
+function render(){document.querySelectorAll('.sticker').forEach(b=>{let i=+b.dataset.i;b.style.background=colors[state[i]].hex;b.setAttribute('aria-label',`${names[stickers[i].f]}, hàng ${stickers[i].r+1}, cột ${stickers[i].c+1}: ${colors[state[i]].name}`)});let counts={};for(let c of state)counts[c]=(counts[c]||0)+1;document.querySelector('#counts').innerHTML=Object.entries(colors).map(([c,v])=>`<span class="count ${(counts[c]||0)!==({W:9,Y:9,G:12,B:12,O:12,R:12}[c])?'bad':''}"><i style="background:${v.hex}"></i>${v.name} ${counts[c]||0}/${{W:9,Y:9,G:12,B:12,O:12,R:12}[c]}</span>`).join('');document.querySelector('#status').textContent=state===goal?'ĐÃ HOÀN THÀNH':'ĐANG CHỈNH SỬA';draw()}
+// 3D projection; the cuboid's vertical spacing is physically equal to its horizontal spacing.
+const canvas=document.querySelector('#cube'),ctx=canvas.getContext('2d');let yaw=-.58,pitch=.35,hit=[];
+function project(p,ya=yaw,pi=pitch){let [x,y,z]=p;let x1=x*Math.cos(ya)+z*Math.sin(ya),z1=-x*Math.sin(ya)+z*Math.cos(ya);let y1=y*Math.cos(pi)-z1*Math.sin(pi),z2=y*Math.sin(pi)+z1*Math.cos(pi);let scale=78;return [360+x1*scale,287-y1*scale,z2]}
+function corners(s){let [x,y,z]=s.p;let h=.46,g=.455;let X=x,Y=y/2,Z=z;if(s.f==='F'||s.f==='B')return [[X-h,Y+h,Z*1.5],[X+h,Y+h,Z*1.5],[X+h,Y-h,Z*1.5],[X-h,Y-h,Z*1.5]];if(s.f==='L'||s.f==='R')return [[X*1.5,Y+h,Z-g],[X*1.5,Y+h,Z+g],[X*1.5,Y-h,Z+g],[X*1.5,Y-h,Z-g]];return [[X-h,Y+Math.sign(Y)*.5,Z-g],[X+h,Y+Math.sign(Y)*.5,Z-g],[X+h,Y+Math.sign(Y)*.5,Z+g],[X-h,Y+Math.sign(Y)*.5,Z+g]]}
+function rotatePoint(p,axis,angle){let [x,y,z]=p,c=Math.cos(angle),s=Math.sin(angle);if(axis===0)return [x,y*c-z*s,y*s+z*c];if(axis===1)return [x*c+z*s,y,-x*s+z*c];return [x*c-y*s,x*s+y*c,z]}
+function drawScene(context,ya,pi,focus=null,animation=null){context.clearRect(0,0,720,550);context.save();context.fillStyle='rgba(62,83,61,.09)';context.beginPath();context.ellipse(360,470,170,20,0,0,Math.PI*2);context.fill();context.restore();let polygons=stickers.map((st,i)=>{let ps=corners(st);if(animation&&st.p[animation.move.axis]===animation.move.layer)ps=ps.map(p=>rotatePoint(p,animation.move.axis,animation.angle));let pts=ps.map(p=>project(p,ya,pi));return {i,pts,depth:pts.reduce((a,p)=>a+p[2],0)/4}}).sort((a,b)=>a.depth-b.depth);for(const poly of polygons){context.beginPath();poly.pts.forEach((p,j)=>j?context.lineTo(p[0],p[1]):context.moveTo(p[0],p[1]));context.closePath();context.strokeStyle='#263c30';context.lineWidth=8;context.lineJoin='round';context.stroke();context.fillStyle=colors[state[poly.i]].hex;context.fill();if(focus&&stickers[poly.i].p[focus.axis]===focus.layer){context.strokeStyle='#f1a05b';context.lineWidth=4;context.stroke()}}return polygons}
+function draw(){hit=drawScene(ctx,yaw,pitch)}
+const guideCanvas=document.querySelector('#guideCube'),guideCtx=guideCanvas.getContext('2d');let guideYaw=-.58,guidePitch=.35,guideDown=null;
+function drawGuide(animation=null){let focus=step<solution.length?moves[solution[step]]:null;drawScene(guideCtx,guideYaw,guidePitch,focus,animation)}
+guideCanvas.addEventListener('pointerdown',e=>{guideDown={x:e.clientX,y:e.clientY};guideCanvas.setPointerCapture(e.pointerId)});guideCanvas.addEventListener('pointermove',e=>{if(!guideDown)return;guideYaw+=(e.clientX-guideDown.x)*.01;guidePitch=Math.max(-1.35,Math.min(1.35,guidePitch+(e.clientY-guideDown.y)*.01));guideDown={x:e.clientX,y:e.clientY};if(!animating)drawGuide()});guideCanvas.addEventListener('pointerup',()=>guideDown=null);guideCanvas.addEventListener('pointercancel',()=>guideDown=null);
+function pointIn(x,y,pts){let inside=false;for(let i=0,j=pts.length-1;i<pts.length;j=i++){let a=pts[i],b=pts[j];if((a[1]>y)!==(b[1]>y)&&x<(b[0]-a[0])*(y-a[1])/(b[1]-a[1])+a[0])inside=!inside}return inside}
+let down=null;canvas.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,moved:false};canvas.setPointerCapture(e.pointerId)});canvas.addEventListener('pointermove',e=>{if(!down)return;let dx=e.clientX-down.lastX,dy=e.clientY-down.lastY;if(Math.abs(e.clientX-down.x)+Math.abs(e.clientY-down.y)>4)down.moved=true;if(down.moved){yaw+=dx*.01;pitch=Math.max(-1.35,Math.min(1.35,pitch+dy*.01));draw()}down.lastX=e.clientX;down.lastY=e.clientY});canvas.addEventListener('pointerup',e=>{if(down&&!down.moved){let rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)*720/rect.width,y=(e.clientY-rect.top)*550/rect.height;for(let i=hit.length-1;i>=0;i--)if(pointIn(x,y,hit[i].pts)){paint(hit[i].i);break}}down=null});document.querySelector('#resetView').onclick=()=>{yaw=-.58;pitch=.35;draw()};
+function stopPlayback(){if(playTimer){clearInterval(playTimer);playTimer=null}const b=document.querySelector('#playStep');if(b)b.innerHTML='▶ &nbsp; Phát tự động'}
+function cancelAnimation(){if(animFrame!==null)cancelAnimationFrame(animFrame);animFrame=null;animating=false}
+function showSolution(path){stopPlayback();cancelAnimation();solution=path;step=0;solutionStart=state;solutionHistory=history?history.slice():null;document.querySelector('#empty').hidden=true;document.querySelector('#solutionContent').hidden=false;document.querySelector('#solutionIntro').textContent=path.length?`Đã tìm thấy ${path.length} phép xoay. Làm theo từng bước trên khối của bạn.`:'Khối của bạn đã ở trạng thái hoàn thành.';renderSolution();document.querySelector('#solution').scrollIntoView({behavior:'smooth',block:'start'})}
+function seekStep(target){cancelAnimation();step=Math.max(0,Math.min(solution.length,target));state=solutionStart;for(let i=0;i<step;i++)state=apply(state,solution[i]);history=solutionHistory?solutionHistory.concat(solution.slice(0,step)):null;if(step===solution.length)stopPlayback();render();renderSolution()}
+function renderSolution(){let total=solution.length;document.querySelector('#stepMeta').textContent=`ĐÃ THỰC HIỆN ${step} / ${total} BƯỚC`;let percent=total?Math.round(step/total*100):100;document.querySelector('#progressPercent').textContent=percent+'%';document.querySelector('#progressBar').style.width=percent+'%';document.querySelector('#stepLabel').textContent=step<total?`BƯỚC TIẾP THEO · ${step+1}`:'TRẠNG THÁI';document.querySelector('#stepTitle').textContent=step<total?moves[solution[step]].label:'Hoàn thành! ✳';document.querySelector('#stepDescription').textContent=step<total?moves[solution[step]].description:'Tất cả các mặt đã trở về đúng màu.';document.querySelector('#prevStep').disabled=step===0;document.querySelector('#nextStep').disabled=step===total;document.querySelector('#playStep').disabled=total===0;let slider=document.querySelector('#stepSlider');slider.max=total;slider.value=step;slider.setAttribute('aria-valuetext',`Đã thực hiện ${step} trên ${total} bước`);document.querySelector('#timelineCount').textContent=`${step} / ${total}`;document.querySelector('#stepsList').innerHTML=solution.map((m,i)=>`<button class="step-chip ${i===step?'current':i<step?'done':''}" data-step="${i}" title="Xem trước bước ${i+1}">${i+1}. ${moves[m].label}</button>`).join('');drawGuide()}
+function animateNext(){if(animating||step>=solution.length)return;animating=true;let move=moves[solution[step]],angle=move.axis===1?(move.turn===1?-Math.PI/2:move.turn===3?Math.PI/2:-Math.PI):Math.PI;let start=null,duration=450/(+document.querySelector('#playSpeed').value||1);function frame(time){if(start===null)start=time;let t=Math.min(1,(time-start)/duration),ease=t*t*(3-2*t);drawGuide({move,angle:angle*ease});if(t<1)animFrame=requestAnimationFrame(frame);else{animFrame=null;animating=false;seekStep(step+1)}}animFrame=requestAnimationFrame(frame)}
+document.querySelector('#nextStep').onclick=()=>{stopPlayback();animateNext()};document.querySelector('#prevStep').onclick=()=>{stopPlayback();seekStep(step-1)};document.querySelector('#stepSlider').oninput=e=>{stopPlayback();seekStep(+e.target.value)};document.querySelector('#stepsList').onclick=e=>{let b=e.target.closest('button[data-step]');if(b){stopPlayback();seekStep(+b.dataset.step)}};function schedulePlayback(){if(playTimer)clearInterval(playTimer);let speed=+document.querySelector('#playSpeed').value||1;playTimer=setInterval(()=>{if(step>=solution.length){stopPlayback();return}animateNext()},1000/speed)}
+document.querySelector('#playSpeed').onchange=()=>{if(playTimer)schedulePlayback()};
+document.querySelector('#playStep').onclick=()=>{if(playTimer){stopPlayback();return}if(!solution.length)return;if(step===solution.length)seekStep(0);document.querySelector('#playStep').innerHTML='❚❚ &nbsp; Tạm dừng';animateNext();schedulePlayback()};
+function stopSearch(){if(activeWorker){activeWorker.terminate();activeWorker=null}busy=false;document.querySelector('#solve').disabled=false;document.querySelector('#solve').innerHTML='Tìm cách giải <span>↗</span>';document.querySelector('#searchStatus').hidden=true}
+document.querySelector('#cancelSearch').onclick=()=>{stopSearch();notify('Đã dừng tìm kiếm. Bạn có thể tìm lại bất cứ lúc nào.')};
+// Each physical piece has a fixed set of colours. This catches impossible or
+// duplicate pieces, although it is not a complete parity/orientation check.
+function pieceMultiset(s){const pieces=new Map();stickers.forEach((v,i)=>{let k=v.p.join(',');if(!pieces.has(k))pieces.set(k,[]);pieces.get(k).push(s[i])});let a=[...pieces.values()].map(v=>v.sort().join('')).sort();return a.join('|')}
+document.querySelector('#solve').onclick=()=>{if(busy)return;if(state===goal){showSolution([]);return}let counts={};for(let c of state)counts[c]=(counts[c]||0)+1;if(Object.entries({W:9,Y:9,G:12,B:12,O:12,R:12}).some(([c,n])=>counts[c]!==n)){notify('Số ô của mỗi màu chưa đúng. Hãy kiểm tra bộ đếm bên dưới bảng trải.');return}if(pieceMultiset(state)!==pieceMultiset(goal)){notify('Tổ hợp màu trên một hoặc nhiều viên không hợp lệ. Hãy kiểm tra lại các ô.');return}if(history){let p=history.slice().reverse().map(inv);let test=state;for(let m of p)test=apply(test,m);if(test===goal){showSolution(p);return}}
+busy=true;document.querySelector('#solve').disabled=true;document.querySelector('#solve').textContent='Đang tìm lời giải…';document.querySelector('#searchStatus').hidden=false;document.querySelector('#searchProgress').textContent='Đang chuẩn bị tìm kiếm…';
+const workerCode=`
+onmessage=function(e){
+ const {start,goal,perms,inverses,axes,layers}=e.data;
+ function apply(s,m){let a=Array(66),p=perms[m];for(let i=0;i<66;i++)a[p[i]]=s[i];return a.join('')}
+ // First try a fast 8-move meet-in-the-middle search.
+ let A=new Map([[start,[]]]),B=new Map([[goal,[]]]),fa=[start],fb=[goal];
+ for(let depth=0;depth<8;depth++){
+  let map=depth%2===0?A:B,other=depth%2===0?B:A,front=depth%2===0?fa:fb,next=[];
+  for(let s of front){let path=map.get(s);for(let m=0;m<perms.length;m++){
+   if(path.length){let last=path[path.length-1];if(axes[m]===axes[last]&&layers[m]===layers[last])continue}
+   let t=apply(s,m);if(map.has(t))continue;let p=path.concat(m);map.set(t,p);
+   if(other.has(t)){let pa=depth%2===0?p:other.get(t),pb=depth%2===0?other.get(t):p;postMessage({type:'result',path:pa.concat(pb.slice().reverse().map(x=>inverses[x]))});return}next.push(t)
+  }}if(depth%2===0)fa=next;else fb=next;
+ }
+ A=null;fa=null;fb=null;
+ // Admissible lower bounds: for each colour and sticker position, the fewest
+ // turns needed to reach any position of that colour in the solved state.
+ let dist={};for(let color of new Set(goal)){
+  let d=new Uint8Array(66).fill(255),q=[];for(let i=0;i<66;i++)if(goal[i]===color){d[i]=0;q.push(i)}
+  for(let k=0;k<q.length;k++){let p=q[k];for(let m=0;m<perms.length;m++){let t=perms[m][p];if(d[t]===255){d[t]=d[p]+1;q.push(t)}}}dist[color]=d
+ }
+ let maxAffected=Math.max(...perms.map(p=>p.reduce((n,t,i)=>n+(t!==i),0)));
+ let nodes=0,path=[],found=null,startTime=Date.now();
+ function heuristic(s){let wrong=0,h=0;for(let i=0;i<66;i++){if(s[i]!==goal[i])wrong++;let v=dist[s[i]][i];if(v>h)h=v}return Math.max(h,Math.ceil(wrong/maxAffected))}
+ function dfs(s,remaining,last){
+  nodes++;if(nodes%500000===0)postMessage({type:'progress',depth:bound,nodes,seconds:Math.floor((Date.now()-startTime)/1000)});
+  let h=heuristic(s);if(h>remaining)return false;if(s===goal){found=path.slice();return true}if(remaining<=4){let tail=B.get(s);if(tail&&tail.length<=remaining){found=path.concat(tail.slice().reverse().map(x=>inverses[x]));return true}return false}
+  for(let m=0;m<perms.length;m++){
+   // Turns in the same layer combine; independent layers on one axis commute.
+   if(last>=0&&axes[m]===axes[last]&&(layers[m]===layers[last]||layers[m]<layers[last]))continue;
+   path.push(m);if(dfs(apply(s,m),remaining-1,m))return true;path.pop()
+  }return false
+ }
+ // No fixed move limit: iterative deepening continues until found or cancelled.
+ for(var bound=Math.max(9,heuristic(start));;bound++){
+  postMessage({type:'progress',depth:bound,nodes,seconds:Math.floor((Date.now()-startTime)/1000)});
+  if(dfs(start,bound,-1)){postMessage({type:'result',path:found});return}
+ }
+}`;
+let url=URL.createObjectURL(new Blob([workerCode],{type:'text/javascript'}));let worker=new Worker(url);URL.revokeObjectURL(url);activeWorker=worker;let searchState=state;
+worker.onmessage=e=>{if(e.data.type==='progress'){document.querySelector('#searchProgress').textContent=`Đang tìm đến ${e.data.depth} phép xoay · ${e.data.nodes.toLocaleString('vi-VN')} trạng thái · ${e.data.seconds} giây`;return}let path=e.data.path;stopSearch();if(state!==searchState){notify('Khối đã thay đổi trong lúc tìm. Hãy thử lại.');return}let test=searchState;for(let m of path)test=apply(test,m);if(test!==goal){notify('Lời giải không hợp lệ. Vui lòng thử lại.');return}showSolution(path)};
+worker.onerror=()=>{stopSearch();notify('Bộ tìm kiếm gặp lỗi hoặc hết bộ nhớ. Vui lòng thử lại.')};worker.postMessage({start:state,goal,perms:moves.map(m=>m.perm),inverses:moves.map((_,i)=>inv(i)),axes:moves.map(m=>m.axis),layers:moves.map(m=>m.layer)})};
+renderPalette();render();
