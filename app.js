@@ -1,3 +1,6 @@
+// Theme is initialized before the stylesheet to avoid a flash of the wrong mode.
+function updateThemeToggle(){const dark=document.documentElement.dataset.theme==='dark';document.querySelector('#themeIcon').textContent=dark?'☀':'☾';document.querySelector('#themeText').textContent=dark?'Chế độ sáng':'Chế độ tối';const toggle=document.querySelector('#themeToggle');toggle.setAttribute('aria-pressed',String(dark));toggle.setAttribute('aria-label',dark?'Chuyển sang giao diện sáng':'Chuyển sang giao diện tối')}
+document.querySelector('#themeToggle').onclick=()=>{const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;try{localStorage.setItem('rubik-theme',theme)}catch(e){}updateThemeToggle()};updateThemeToggle();
 const colors={W:{name:'Trắng',hex:'#f8f8f2'},Y:{name:'Vàng',hex:'#e9c45f'},G:{name:'Xanh lá',hex:'#72a886'},B:{name:'Xanh dương',hex:'#7199bb'},O:{name:'Cam',hex:'#eaa272'},R:{name:'Đỏ',hex:'#db7469'}};
 const faces=['U','L','F','R','B','D'], names={U:'TRÊN',D:'DƯỚI',F:'TRƯỚC',B:'SAU',L:'TRÁI',R:'PHẢI'}, faceColor={U:'W',D:'Y',F:'G',B:'B',L:'O',R:'R'};
 const stickers=[];const yval=r=>3-2*r;
